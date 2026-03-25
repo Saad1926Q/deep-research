@@ -13,6 +13,6 @@ from src.tools import internet_search
 clarifier = dspy.Predict(ClarifierSignature)
 planner = dspy.Predict(PlannerSignature)
 gatherer = dspy.ReAct(GathererSignature, tools=[internet_search])
-processor = dspy.Predict(UrlProcessorSignature)
+processor = dspy.RLM(UrlProcessorSignature)
 synthesizer = dspy.Predict(SynthesizerSignature)
 annotator = dspy.Predict(AnnotatorSignature)
