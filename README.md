@@ -8,7 +8,7 @@ An attempt to implement deep research using DSPy - and in the process, learn abo
 
 ## What this is
 
-Basically a research agent that you give a query, it asks some clarifying questions, breaks it into subtopics, searches the web, reads pages, and writes a report with citations. but the main point isn't really just building something that works - it's going through the whole loop of building, evaluating, and actually optimizing an LLM pipeline using DSPy and learning stuff along the way.
+a research agent that you give a query, it asks clarifying questions, then dynamically searches the web across multiple hops - deciding what to look for next based on what it already knows - and writes a report with inline citations. but the main point isn't really just building something that works - it's going through the whole loop of building, evaluating, and actually optimizing an LLM pipeline using DSPy and learning stuff along the way.
 
 Inspired by this [blog post](https://www.cmpnd.ai/blog/learn-dspy-deep-research.html) which walks through building a deep research agent with DSPy.
 
