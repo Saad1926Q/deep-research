@@ -1,16 +1,19 @@
 import dspy
+from dspy.signatures.field import OutputField
 
 from src.signatures import (
     ClarifierSignature,
-    GathererSignature,
-    PlannerSignature,
+    ResearcherSignature,
     SynthesizerSignature,
     UrlProcessorSignature,
 )
-from src.tools import internet_search
 
 clarifier = dspy.Predict(ClarifierSignature)
-planner = dspy.Predict(PlannerSignature)
-gatherer = dspy.ReAct(GathererSignature, tools=[internet_search])
+researcher = dspy.ChainOfThought(
+    ResearcherSignature,
+    rationale_field=OutputField(
+        desc="reason about what you already know and what is still missing - 'I know X, but I still need Y'"
+    ),
+)
 processor = dspy.RLM(UrlProcessorSignature)
 synthesizer = dspy.Predict(SynthesizerSignature)

@@ -1,13 +1,16 @@
 import asyncio
+import os
 from datetime import datetime
 
 import dspy
 
 from src.config import pipeline_lm
-from src.modules import clarifier, gatherer, planner, synthesizer
-from src.utils import process_url
+from src.modules import clarifier, researcher, synthesizer
+from src.utils import internet_search, process_url
 
 dspy.configure(lm=pipeline_lm)
+
+MAX_HOPS = 10
 
 
 async def run_pipeline(
@@ -21,10 +24,10 @@ async def run_pipeline(
         # Step 1: get research query
         research_request = input("Enter your research query: ").strip()
 
-    # Step 2: clarify
-    clarifier_result = clarifier(research_request=research_request.strip())
-
     if not eval:
+        # Step 2: clarify
+        clarifier_result = clarifier(research_request=research_request.strip())
+
         # Step 3: ask clarifying questions one by one
         clarifying_questions_and_answers = []
         for question in clarifier_result.clarifying_questions:
@@ -34,51 +37,51 @@ async def run_pipeline(
                 {"question": question, "answer": answer}
             )
 
-    # Step 4: plan subtopics
-    planner_result = planner(
-        research_request=research_request,
-        clarifying_questions_and_answers=clarifying_questions_and_answers,
-        max_num_research_topics=5,
-    )
-    print(f"Research topics: {planner_result.research_topics}\n")
-
-    # Step 5: gather + process each topic
-    gathered_findings = []
-    for topic in planner_result.research_topics:
-        print(f"\nGathering sources for: {topic}")
-        gatherer_result = gatherer(
+    # Step 4: multi-hop research loop
+    accumulated_facts = []
+    for hop in range(MAX_HOPS):
+        researcher_result = researcher(
             research_request=research_request,
-            subtopic_to_research=topic,
-            num_sources=5,
+            clarifying_questions_and_answers=clarifying_questions_and_answers,
+            accumulated_facts=accumulated_facts,
         )
 
-        sources = await asyncio.gather(
-            *[
-                process_url(url, research_request, topic)
-                for url in gatherer_result.urls_list
-            ]
-        )
-        relevant_sources = [s for s in sources if s["page_is_relevant"]]
-        gathered_findings.append({"subtopic": topic, "sources": relevant_sources})
+        if researcher_result.is_done:
+            print("Research complete.")
+            break
 
-    # Step 6: synthesize
-    print("Synthesizing report...\n")
+        print(f"\nHop {hop + 1}: {researcher_result.search_query}")
+
+        search_results = internet_search(researcher_result.search_query, max_results=3)
+        urls = [r["url"] for r in search_results.get("results", [])]
+
+        processed = await asyncio.gather(
+            *[process_url(url, research_request) for url in urls]
+        )
+
+        for result in processed:
+            if result["page_is_relevant"]:
+                accumulated_facts.append({
+                    "url": result["url"],
+                    "facts": result["relevant_facts"],
+                })
+
+    # Step 5: synthesize
+    print("\nSynthesizing report...")
     synthesizer_result = synthesizer(
         research_request=research_request,
         clarifying_questions_and_answers=clarifying_questions_and_answers,
-        research_topics=planner_result.research_topics,
-        gathered_findings=gathered_findings,
+        accumulated_facts=accumulated_facts,
     )
 
     print(synthesizer_result.annotated_report)
 
     if eval:
-        import os
         os.makedirs(f"reports/{name}", exist_ok=True)
         filename = f"reports/{name}/{idx}.md"
     else:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"research_report_{timestamp}.txt"
+        filename = f"research_report_{timestamp}.md"
 
     with open(filename, "w") as f:
         f.write(synthesizer_result.annotated_report)

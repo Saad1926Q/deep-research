@@ -34,7 +34,7 @@ for _, row in df.iterrows():
         "research_request": research_request,
         "clarifying_questions_and_answers": clarifying_questions_and_answers,
     }
-    print(f"  done — {len(clarifying_questions_and_answers)} questions")
+    print(f"  done - {len(clarifying_questions_and_answers)} questions")
 
 with open("evals/clarifications.pkl", "wb") as f:
     pickle.dump(clarifications, f)
