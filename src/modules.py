@@ -1,7 +1,6 @@
 import dspy
 
 from src.signatures import (
-    AnnotatorSignature,
     ClarifierSignature,
     GathererSignature,
     PlannerSignature,
@@ -15,4 +14,3 @@ planner = dspy.Predict(PlannerSignature)
 gatherer = dspy.ReAct(GathererSignature, tools=[internet_search])
 processor = dspy.RLM(UrlProcessorSignature)
 synthesizer = dspy.Predict(SynthesizerSignature)
-annotator = dspy.Predict(AnnotatorSignature)

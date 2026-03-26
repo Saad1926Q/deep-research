@@ -4,27 +4,35 @@ from datetime import datetime
 import dspy
 
 from src.config import pipeline_lm
-from src.modules import annotator, clarifier, gatherer, planner, synthesizer
+from src.modules import clarifier, gatherer, planner, synthesizer
 from src.utils import process_url
 
 dspy.configure(lm=pipeline_lm)
 
 
-async def main():
-    # Step 1: get research query
-    research_request = input("Enter your research query: ").strip()
+async def run_pipeline(
+    eval: bool = False,
+    research_request: str | None = None,
+    name: str | None = None,
+    idx: str | None = None,
+    clarifying_questions_and_answers: list | None = None,
+):
+    if not eval:
+        # Step 1: get research query
+        research_request = input("Enter your research query: ").strip()
 
     # Step 2: clarify
-    clarifier_result = clarifier(research_request=research_request)
+    clarifier_result = clarifier(research_request=research_request.strip())
 
-    # Step 3: ask clarifying questions one by one
-    clarifying_questions_and_answers = []
-    for question in clarifier_result.clarifying_questions:
-        print(f"{question}\n")
-        answer = input("Your answer: ").strip()
-        clarifying_questions_and_answers.append(
-            {"question": question, "answer": answer}
-        )
+    if not eval:
+        # Step 3: ask clarifying questions one by one
+        clarifying_questions_and_answers = []
+        for question in clarifier_result.clarifying_questions:
+            print(f"{question}\n")
+            answer = input("Your answer: ").strip()
+            clarifying_questions_and_answers.append(
+                {"question": question, "answer": answer}
+            )
 
     # Step 4: plan subtopics
     planner_result = planner(
@@ -62,20 +70,20 @@ async def main():
         gathered_findings=gathered_findings,
     )
 
-    # Step 7: annotate
-    annotator_result = annotator(
-        synthesized_report=synthesizer_result.synthesized_report,
-        processed_sources=gathered_findings,
-    )
+    print(synthesizer_result.annotated_report)
 
-    print("\n=== FINAL REPORT ===\n")
-    print(annotator_result.annotated_report)
+    if eval:
+        import os
+        os.makedirs(f"reports/{name}", exist_ok=True)
+        filename = f"reports/{name}/{idx}.md"
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"research_report_{timestamp}.txt"
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"research_report_{timestamp}.txt"
     with open(filename, "w") as f:
-        f.write(annotator_result.annotated_report)
+        f.write(synthesizer_result.annotated_report)
     print(f"\nReport saved to {filename}")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(run_pipeline())

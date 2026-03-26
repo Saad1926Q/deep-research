@@ -11,11 +11,17 @@ basically a research agent that you give a query, it asks some clarifying questi
 ```
 User Query
     → Clarifier      asks clarifying questions to narrow the scope
-    → Planner        breaks the query into research subtopics
-    → Gatherer       finds relevant URLs per subtopic (web search)
-    → Processor      reads each page and extracts facts and summaries
-    → Synthesizer    writes a structured report from all the findings
-    → Annotator      adds inline citations to the report
+
+    → Multi-hop retrieval loop
+        at each hop:
+            - takes accumulated facts (empty initially) + query
+            - generates a chain of thought: "I know X, but I still need Y"
+            - uses that CoT to fire a web search
+            - fetches the page, runs it through the processor, adds facts to the pool
+            - also generates a boolean: is retrieval done?
+            - stops when done=True or max hops is reached
+
+    → Synthesizer    takes the accumulated fact pool, writes report with inline citations
 ```
 
 Each step is a DSPy module. One thing worth mentioning is the Processor uses `dspy.RLM` - RLM stands for Retrieve-Language Model. The intuition here is that we're passing in the full content of a webpage, which can get really long and blow up the context window. instead of compacting it or truncating it, it makes more sense to treat the page content as an external store that the LM retrieves from - so the LM only actually sees the relevant chunks, not the whole thing. that's basically what RLM does.
@@ -29,55 +35,60 @@ The rough idea was:
 3. Optimize based on eval results using GEPA
 4. Re-run evals and compare
 
+The next direction is replacing the rigid plan-then-gather pipeline with a multi-hop retrieval loop. Instead of planning N topics upfront and searching for each, the agent dynamically decides what to search for at each hop based on what it's already learned:
+
+- at each hop, a researcher component looks at the research request + accumulated facts and reasons about what it knows and what's still missing (chain of thought style)
+- it then generates the next search query and a `is_done` signal
+- the search returns 3 URLs, all read in parallel, facts added to the pool
+- loop continues until `is_done` or max hops reached
+- synthesizer then writes the report from the full fact pool
+
+this is closer to how real deep research works — the agent adapts its search strategy as it learns, rather than committing to a fixed plan upfront.
+
 ## Evals
 
-Instead of just eyeballing outputs and guessing whether the pipeline is doing well, I want to actually quantitatively measure how each component is performing. So the plan is to run evals on each module individually and get concrete scores I can track and optimize against.
+Instead of just eyeballing outputs and guessing whether the pipeline is doing well, I want to actually quantitatively measure how the system is performing. The approach is rubric-based evaluation - inspired by [ResearchRubrics: A Benchmark of Prompts and Rubrics For Evaluating Deep Research Agents](https://arxiv.org/abs/2511.07685) (Scale AI, 2025), which was built specifically for evaluating deep research agents. we use their [dataset](https://huggingface.co/datasets/ScaleAI/researchrubrics) directly — the prompts and rubrics are already written, so we just run the pipeline on each prompt and score the output. that said, we only evaluate on a small subset (5 samples) given the limited budget — each run costs API calls for both the pipeline and the judge. the goal here isn't to produce state-of-the-art numbers anyway, it's to go through the full loop of building, evaluating, and optimizing an LLM pipeline and actually understand how these ideas work in practice.
 
-### Why I freeze eval data
+### How rubric-based evals work
 
-Web search is non-deterministic - the same query on different days returns different URLs, and page content changes. If evals hit the live web every run, score differences could come from changed search results rather than anything the optimization did.
+Each research prompt comes paired with a rubric - a list of specific criteria the response should satisfy, each with a weight. The judge LM scores each criterion:
 
-So I freeze the web-facing part of the pipeline (gatherer + page fetch) into a snapshot collected once. All eval runs draw from the same frozen page content, so any score difference is attributable to the modules being evaluated, not the data.
+- `1` — satisfied
+- `0.5` — partially satisfied
+- `0` — not satisfied
+
+The final compliance score is:
+
+```
+score = sum(verdict × weight for all criteria) / sum of positive weights
+```
+
+Weights reflect importance:
+- `[+4, +5]` — critically important, required for a minimally viable response. without this the response is fundamentally flawed.
+- `[+2, +3]` — important, a key feature of a strong response but not absolutely essential.
+- `+1` — slightly important, a nice-to-have that improves a good response but doesn't significantly change overall quality.
+- `-1` — slightly detrimental, a minor issue or stylistic weakness that doesn't impact core quality.
+- `[-3, -2]` — detrimental, a significant error that hurts quality or introduces faulty logic.
+- `[-5, -4]` — critically detrimental, so severe it makes the response actively harmful or completely invalidates its reasoning.
+
+this is much more meaningful than generic LLM judge questions because the criteria are specific to each prompt. for example, given a prompt like "write a history of Counter-Strike as an esport", a generic judge asking "is this well structured?" tells you very little. but a rubric criterion like "does the response cover the transition from CS 1.6 to CS:GO to CS2?" actually measures whether the report did its job.
+
+### Data
+
+Using a subset of prompts from the ResearchRubrics dataset. the rubrics are already written. running the pipeline on each prompt produces a markdown report, and the evaluator scores it against the rubric automatically.
 
 ### What I evaluate
 
-**Clarifier** - questions are relevant and help narrow the research request
+we'll be evaluating the final report generated by the pipeline using this rubric-based approach.
 
-**Planner** - topics cover the full scope, are distinct and non-overlapping
+### Running evals
 
-**Processor** - correctly rejects irrelevant pages (hard negatives)
+First generate reports by running the pipeline on each sample, then evaluate:
 
-I wanted to also evaluate whether the extracted facts are grounded in the actual page content (no hallucinations), but couldn't find a clean way to do this. Passing full raw page content to a judge LM is expensive at eval scale, and the approaches I tried weren't reliable enough to be worth it.
+```bash
+python -m evals.run_evals --name baseline
+```
 
-**Synthesizer** - answers the request, uses the gathered findings, well-structured, doesn't leak content from irrelevant pages
-
-**Annotator** - citations are grounded in actual sources, report content is unchanged, follows `[N]` format with a References section
-
-### Data splits
-
-20 snapshots split into:
-- **Test (6)** - held out, used only for baseline vs optimized comparison
-- **Train (4)** - used by GEPA to bootstrap traces and few-shot examples
-- **Val (10)** - used by GEPA to evaluate candidate prompts during optimization
-
-The dataset is small - I'm aware of that. Collecting snapshots is manual work (run the full pipeline, then manually add hard negative sources per topic), and I don't want to spend a ton of time and money just on data collection at this stage.
+Expects reports at `reports/baseline/<sample_id>.md`. Saves scores to `evals/baseline_results.csv`.
 
 ---
-
-## Notes
-
-### 25th March, 2026
-
-I thought the implementation was basically done and I just needed to run evals and then optimize. Turns out I was wrong.
-
-After running evals I found a problem with the architecture itself. The annotator was scoring low, and after thinking about it I realized the issue: the annotator has no idea which source belongs to which section of the report. The synthesizer takes all the findings and writes a report, but the connection between claims and sources is lost in that step. So when the annotator tries to add citations, it's essentially guessing - which is why it hallucinates.
-
-The fix is to merge the synthesizer and annotator into a single step, since the synthesizer is the only point in the pipeline where the source-to-claim mapping is actually known.
-
-The other thing I realized is that the research feels quite rigid. It plans N topics upfront, gathers N sources per topic, and that's it. It can't follow up on something interesting it found, or adjust what it searches for based on what it already knows. That's a big gap compared to how Perplexity or Claude's deep research actually works - those are loops, not pipelines. The agent decides what to search for next based on what it just read, which is fundamentally different.
-
-Looking into this led me to multi-hop retrieval, which is the pattern that actually makes this kind of dynamic research possible. Might explore that next.
-
-So two main takeaways from this initial exploration:
-1. The synthesizer and annotator need to be merged - the architecture breaks the source tracking
-2. The pipeline is too rigid - multi-hop is the right direction for more autonomous research

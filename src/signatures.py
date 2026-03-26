@@ -35,7 +35,20 @@ class UrlProcessorSignature(dspy.Signature):
 
 
 class SynthesizerSignature(dspy.Signature):
-    """Synthesize a comprehensive, well-structured research report from the gathered findings.
+    """Synthesize a comprehensive, well-structured research report from the gathered findings,
+    with inline citations added as you write.
+
+    For each section, you know exactly which sources it came from (they are in gathered_findings).
+    As you write each claim, fact, or statistic, add an inline [N] citation immediately after it.
+    At the end of the report, add a 'References' section listing each source as:
+    [1] URL
+    [2] URL
+    ...
+
+    Use the same number wherever the same source is cited more than once.
+    Every specific claim must have a citation. Do not add citations at the end of paragraphs —
+    cite each individual claim inline as you write it.
+
     The report must cover every research topic in depth, include specific facts, statistics, dates,
     and named examples from the sources, and draw connections across topics where relevant.
     Use markdown with clear section headers. Do not pad with vague generalities - every claim
@@ -47,24 +60,6 @@ class SynthesizerSignature(dspy.Signature):
     gathered_findings: list[dict] = dspy.InputField(
         desc="per-subtopic processed sources, each with 'subtopic' and 'sources' (list of {url, summary, relevant_facts})"
     )
-    synthesized_report: str = dspy.OutputField(
-        desc="comprehensive markdown report with a section per research topic, grounded in specific facts and examples from the sources"
-    )
-
-
-class AnnotatorSignature(dspy.Signature):
-    """Annotate the report with numbered inline citations in the format [1], [2], etc.
-    At the end of the report, add a 'References' section listing each source as:
-    [1] URL
-    [2] URL
-    ...
-    Every specific claim, fact, or statistic in the report must have an inline citation.
-    Use the same number wherever the same source is cited more than once."""
-
-    synthesized_report: str = dspy.InputField()
-    processed_sources: list[dict] = dspy.InputField(
-        desc="per-subtopic processed sources, each with 'subtopic' and 'sources' (list of {url, summary, relevant_facts})"
-    )
     annotated_report: str = dspy.OutputField(
-        desc="the report with inline [N] citations after each claim, followed by a numbered References section"
+        desc="comprehensive markdown report with inline [N] citations after each claim, followed by a numbered References section"
     )
