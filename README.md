@@ -4,6 +4,10 @@
 An attempt to implement deep research using DSPy - and in the process, learn about evals and the core ideas behind DSPy as a framework.
 </p>
 
+<div align="center">
+<img width="70%" alt="deep research" src="deep_research.png" />
+</div>
+
 ---
 
 ## What this is
